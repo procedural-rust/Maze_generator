@@ -1,0 +1,11 @@
+[package]
+name = "maze_generation"
+version = "0.1.0"
+authors = ["Everett Sullivan"]
+edition = "2018"
+
+[dependencies]
+
+rand = "0.3.14"
+image = "*"
+clap = "~2.27.0"
