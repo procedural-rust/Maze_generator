@@ -4,6 +4,8 @@
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::env;
+use std::process;
 
 mod maze;
 use maze::Maze;
@@ -17,23 +19,22 @@ extern crate clap;
 use clap::{Arg, App, ArgGroup};
 
 fn main() {
-
-        let matches = App::new("Maze Maker")
+    let matches = App::new("Maze Maker")
         .version("1.0")
         .author("Everett Sullivan")
         .about("Create Mazes")
         .arg(Arg::with_name("maze x_length")
-                                    .help("Sets the width of the maze. Must be a positive integer.")
-                                    .index(1)
-                                    .required(true))
+            .help("Sets the width of the maze. Must be a positive integer.")
+            .index(1)
+            .required(true))
         .arg(Arg::with_name("maze y_length")
-                                    .help("Sets the depth of the maze. Must be a positive integer.")
-                                    .index(2)
-                                    .required(true))
+            .help("Sets the depth of the maze. Must be a positive integer.")
+            .index(2)
+            .required(true))
         .arg(Arg::with_name("output_file")
-                                    .help("Sets the name of the output file.")
-                                    .index(3)
-                                    .required(true))
+            .help("Sets the name of the output file.")
+            .index(3)
+            .required(true))
         .arg(Arg::with_name("cave")
             .help("The program will generate a cave.")
             .short("c")
@@ -56,7 +57,7 @@ fn main() {
                 .args(&["wilson","prim","backtrack","cave"]))
         .arg(Arg::with_name("image")
             .help("The program will encode the maze as a png image instead of a text image.
-                   Must also state the dimension of each square in pixels.")
+                   Must also state the dimension of each square in pixels. Default: 10.")
             .takes_value(true)
             .short("i")
             .long("image"))
@@ -68,6 +69,17 @@ fn main() {
             .multiple(true))
         .get_matches();
 
+    print!("Using the following arguments to generate from:\n");
+    print!("x: {}    y: {}    Caves: {}    Prim: {}    Wilson: {}    Wrapping {}\n",
+        matches.value_of("maze x_length").unwrap().to_string(),
+        matches.value_of("maze y_length").unwrap().to_string(),
+        matches.is_present("cave"),
+        matches.is_present("wilson"),
+        matches.is_present("prim"),
+        matches.is_present("wrapping"),
+    );
+    print!("output file: {}\n", matches.value_of("output_file").unwrap().to_string());
+
     //safe to unwrap since the arugment is required.
     let output_file_name: String = matches.value_of("output_file").unwrap().to_string();
     let rows = matches.value_of("maze x_length").unwrap().parse::<usize>().unwrap();
@@ -77,22 +89,40 @@ fn main() {
     if matches.is_present("cave"){
         let my_cave = Cave::init_cave(rows,columns).unwrap();
         match matches.value_of("image") {
-            Some(block_size) => print_picture_cave(&my_cave,output_file_name,block_size.parse::<usize>().unwrap()),
+            Some(block_size) => {
+              let mut block = block_size.parse::<usize>().unwrap();
+              if block < 10 {
+                block = 10
+              }
+              print_picture_cave(&my_cave, output_file_name, block)
+            },
             None => print_cave(&my_cave,output_file_name),
         }
     } else { //we generate a maze
-        let (wilson,prim,backtrack) = (matches.is_present("wilson"),matches.is_present("prim"),matches.is_present("backtrack"));
+        let (wilson, prim, backtrack) = (matches.is_present("wilson"),matches.is_present("prim"),matches.is_present("backtrack"));
+        print!("{} {} {} {}\n", wilson, prim, backtrack, wilson || prim || backtrack);
+        // sanity check before generation
+        if !(wilson || prim || backtrack) {
+          print!("You must select (w)ilson, (p)rim or (b)acktrack when not running (c)aves. \nExiting.");
+          process::exit(1);
+        }
         let my_maze;
-        match (wilson,prim,backtrack){
-            (true,_,_) => my_maze = Maze::init_rect(rows,columns,wrap as usize,GenerationType::Wilson).unwrap(),
-            (_,true,_) => my_maze = Maze::init_rect(rows,columns,wrap as usize,GenerationType::Prim).unwrap(),
+        match (wilson, prim, backtrack){
+            (true,_,_) => my_maze = Maze::init_rect(rows, columns, wrap as usize,GenerationType::Wilson).unwrap(),
+            (_,true,_) => my_maze = Maze::init_rect(rows, columns, wrap as usize,GenerationType::Prim).unwrap(),
             (_,_,true) => my_maze = Maze::init_rect(rows,columns,wrap as usize,GenerationType::Backtrack(matches.value_of("backtrack").unwrap().parse::<f64>().unwrap())).unwrap(),
             _ => unreachable!(),
         }
-    
+
         match matches.value_of("image") {
-            Some(block_size) => print_picture_maze(&my_maze,output_file_name,block_size.parse::<usize>().unwrap()),
-            None => print_maze(&my_maze,output_file_name),
+            Some(block_size) => {
+              let mut block = block_size.parse::<usize>().unwrap();
+              if block < 10 {
+                block = 10
+              }
+              print_picture_maze(&my_maze, output_file_name, block)
+            },
+            None => print_maze(&my_maze, output_file_name),
         }
     }
 }
@@ -123,7 +153,11 @@ fn print_picture_cave(my_cave: &Cave, output_file_name: String, block_size: usiz
         }
     }
 
-    imgbuf.save(output_file_name).unwrap();
+    if output_file_name.contains(".jpeg") || output_file_name.contains(".png") {
+        imgbuf.save(output_file_name).unwrap();
+    } else {
+      imgbuf.save(output_file_name + ".png").unwrap();
+    }
 }
 
 fn print_maze(my_maze: &Maze, output_file_name: String){
@@ -169,7 +203,6 @@ fn print_maze(my_maze: &Maze, output_file_name: String){
 }
 
 fn print_picture_maze(my_maze: &Maze, output_file_name: String, block_size: usize){
-
     let block_size_u32 = block_size as u32;
     let mut imgbuf = image::ImageBuffer::new((block_size*(2*my_maze.columns + 1)) as u32, (block_size*(2*my_maze.rows + 1)) as u32);
     let mut wall_matrix = vec![vec![0; 2*my_maze.rows+1]; 2*my_maze.columns+1];
@@ -206,5 +239,9 @@ fn print_picture_maze(my_maze: &Maze, output_file_name: String, block_size: usiz
         }
     }
 
-    imgbuf.save(output_file_name).unwrap();
+    if output_file_name.contains(".jpeg") || output_file_name.contains(".png") {
+        imgbuf.save(output_file_name).unwrap();
+    } else {
+      imgbuf.save(output_file_name + ".png").unwrap();
+    }
 }
