@@ -12,6 +12,8 @@ use maze::Maze;
 use maze::Direction;
 use maze::GenerationType;
 
+mod dungeon;
+
 mod cave;
 use cave::Cave;
 
@@ -39,6 +41,10 @@ fn main() {
             .help("The program will generate a cave.")
             .short("c")
             .long("cave"))
+        .arg(Arg::with_name("dungeon")
+            .help("The program will generate a dungeon.")
+            .short("d")
+            .long("dungeon"))
         .arg(Arg::with_name("wilson")
             .help("The program will generate the maze with Wilson's Algoirthm")
             .short("w")
@@ -57,7 +63,7 @@ fn main() {
                 .args(&["wilson","prim","backtrack","cave"]))
         .arg(Arg::with_name("image")
             .help("The program will encode the maze as a png image instead of a text image.
-                   Must also state the dimension of each square in pixels. Default: 10.")
+                   Must also state the dimension of each square in pixels. Default 10.")
             .takes_value(true)
             .short("i")
             .long("image"))
@@ -70,12 +76,13 @@ fn main() {
         .get_matches();
 
     print!("Using the following arguments to generate from:\n");
-    print!("x: {}    y: {}    Caves: {}    Prim: {}    Wilson: {}    Wrapping {}\n",
+    print!("x: {}    y: {}    Caves: {}    Prim: {}    Wilson: {}   Dungeon: {}    Wrapping {}\n",
         matches.value_of("maze x_length").unwrap().to_string(),
         matches.value_of("maze y_length").unwrap().to_string(),
         matches.is_present("cave"),
-        matches.is_present("wilson"),
         matches.is_present("prim"),
+        matches.is_present("wilson"),
+        matches.is_present("dungeon"),
         matches.is_present("wrapping"),
     );
     print!("output file: {}\n", matches.value_of("output_file").unwrap().to_string());
@@ -90,13 +97,35 @@ fn main() {
         let my_cave = Cave::init_cave(rows,columns).unwrap();
         match matches.value_of("image") {
             Some(block_size) => {
-              let mut block = block_size.parse::<usize>().unwrap();
-              if block < 10 {
-                block = 10
-              }
-              print_picture_cave(&my_cave, output_file_name, block)
+                let mut block = block_size.parse::<usize>().unwrap();
+                if block < 10 {
+                    block = 10
+                }
+                print_picture_cave(&my_cave, output_file_name, block)
             },
             None => print_cave(&my_cave,output_file_name),
+        }
+    } else if matches.is_present("dungeon"){
+        let NUM_ROOMS = 10;
+        let OUTSIDE_EXITS = true;
+        let PRUNE_DEAD_ENDS = 0.9;
+        let generation_method;
+        let (wilson, prim, backtrack) = (matches.is_present("wilson"),matches.is_present("prim"),matches.is_present("backtrack"));
+        match (wilson, prim, backtrack){
+            (true,_,_) => generation_method = GenerationType::Wilson,
+            (_,true,_) => generation_method = GenerationType::Prim,
+            (_,_,true) => generation_method = GenerationType::Backtrack(matches.value_of("backtrack").unwrap().parse::<f64>().unwrap()),
+            _ => unreachable!(),
+        }
+        match matches.value_of("image") {
+            Some(block_size) => {
+                let mut block = block_size.parse::<usize>().unwrap();
+                if block < 10 {
+                    block = 10
+                }
+                dungeon::print_dungeon_as_image(&dungeon::create_dungeon(rows, columns, wrap as usize,generation_method,NUM_ROOMS,PRUNE_DEAD_ENDS,OUTSIDE_EXITS).unwrap(),output_file_name,block);
+            },
+            None => dungeon::print_dugenon_to_file(&dungeon::create_dungeon(rows, columns, wrap as usize,generation_method,NUM_ROOMS,PRUNE_DEAD_ENDS,OUTSIDE_EXITS).unwrap(),output_file_name),
         }
     } else { //we generate a maze
         let (wilson, prim, backtrack) = (matches.is_present("wilson"),matches.is_present("prim"),matches.is_present("backtrack"));
@@ -110,19 +139,19 @@ fn main() {
         match (wilson, prim, backtrack){
             (true,_,_) => my_maze = Maze::init_rect(rows, columns, wrap as usize,GenerationType::Wilson).unwrap(),
             (_,true,_) => my_maze = Maze::init_rect(rows, columns, wrap as usize,GenerationType::Prim).unwrap(),
-            (_,_,true) => my_maze = Maze::init_rect(rows,columns,wrap as usize,GenerationType::Backtrack(matches.value_of("backtrack").unwrap().parse::<f64>().unwrap())).unwrap(),
+            (_,_,true) => my_maze = Maze::init_rect(rows, columns, wrap as usize,GenerationType::Backtrack(matches.value_of("backtrack").unwrap().parse::<f64>().unwrap())).unwrap(),
             _ => unreachable!(),
         }
-
+    
         match matches.value_of("image") {
             Some(block_size) => {
-              let mut block = block_size.parse::<usize>().unwrap();
-              if block < 10 {
-                block = 10
-              }
-              print_picture_maze(&my_maze, output_file_name, block)
+                let mut block = block_size.parse::<usize>().unwrap();
+                if block < 10 {
+                    block = 10
+                }
+                dungeon::print_dungeon_as_image(&dungeon::maze_to_map(&my_maze).unwrap(),output_file_name, block);
             },
-            None => print_maze(&my_maze, output_file_name),
+            None => dungeon::print_dugenon_to_file(&dungeon::maze_to_map(&my_maze).unwrap(),output_file_name),
         }
     }
 }
@@ -140,6 +169,7 @@ fn print_cave(my_cave: &Cave, output_file_name: String){
         }
         f.write("\n".as_bytes()).unwrap();
     }
+    f.flush().unwrap();
 }
 
 fn print_picture_cave(my_cave: &Cave, output_file_name: String, block_size: usize){
@@ -156,92 +186,99 @@ fn print_picture_cave(my_cave: &Cave, output_file_name: String, block_size: usiz
     if output_file_name.contains(".jpeg") || output_file_name.contains(".png") {
         imgbuf.save(output_file_name).unwrap();
     } else {
-      imgbuf.save(output_file_name + ".png").unwrap();
+        imgbuf.save(output_file_name + ".png").unwrap();
     }
 }
 
-fn print_maze(my_maze: &Maze, output_file_name: String){
-    let file = File::create(output_file_name).expect("Unable to create file");
-    let mut f = BufWriter::new(file);
-    f.write("#".as_bytes()).unwrap();
-    for i in 0..my_maze.columns {
-        if my_maze.maze_matrix[my_maze.rows-1][i].has_dir(Direction::North) == true {
-            f.write(" ".as_bytes()).unwrap();
-        }else{
-            f.write("#".as_bytes()).unwrap();
-        }
-        f.write("#".as_bytes()).unwrap();
-    }
-    f.write("\n".as_bytes()).unwrap();
-    for i in (0..my_maze.rows).rev() {
-        if my_maze.maze_matrix[i][0].has_dir(Direction::West) == true {
-            f.write(" ".as_bytes()).unwrap();
-        }else{
-            f.write("#".as_bytes()).unwrap();
-        }
-        for j in 0..my_maze.columns{
-            f.write(" ".as_bytes()).unwrap();
-            if my_maze.maze_matrix[i][j].has_dir(Direction::East) == true {
-            f.write(" ".as_bytes()).unwrap();
-            }else{
-                f.write("#".as_bytes()).unwrap();
-            }
-        }
-        f.write("\n".as_bytes()).unwrap();
-        f.write("#".as_bytes()).unwrap();
-        for j in 0..my_maze.columns {
-            if my_maze.maze_matrix[i][j].has_dir(Direction::South) == true {
-                f.write(" ".as_bytes()).unwrap();
-            }else{
-                f.write("#".as_bytes()).unwrap();
-            }
-            f.write("#".as_bytes()).unwrap();
-        }
-        f.write("\n".as_bytes()).unwrap();
-    }
-    f.flush().unwrap();
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn print_picture_maze(my_maze: &Maze, output_file_name: String, block_size: usize){
-    let block_size_u32 = block_size as u32;
-    let mut imgbuf = image::ImageBuffer::new((block_size*(2*my_maze.columns + 1)) as u32, (block_size*(2*my_maze.rows + 1)) as u32);
-    let mut wall_matrix = vec![vec![0; 2*my_maze.rows+1]; 2*my_maze.columns+1];
-    wall_matrix[0][2*my_maze.rows] = 1;
-    for i in 0..my_maze.columns {
-        if my_maze.maze_matrix[my_maze.rows-1][i].has_dir(Direction::North) == false {
-            wall_matrix[2*i+1][2*my_maze.rows] = 1;
-        }
-        wall_matrix[2*i+2][2*my_maze.rows] = 1;
-    }
-    for i in (0..my_maze.rows).rev() {
-        if my_maze.maze_matrix[i][0].has_dir(Direction::West) == false {
-            wall_matrix[0][2*my_maze.rows-1-2*i] = 1;
-        }
-        for j in 0..my_maze.columns{
-            if my_maze.maze_matrix[i][j].has_dir(Direction::East) == false {
-                wall_matrix[2*j+2][2*my_maze.rows-1-2*i] = 1;
-            }
-        }
-        wall_matrix[0][2*my_maze.rows-2-2*i] = 1;
-        for j in 0..my_maze.columns {
-            if my_maze.maze_matrix[i][j].has_dir(Direction::North) == false {
-                wall_matrix[2*j+1][2*my_maze.rows-2-2*i] = 1;
-            }
-            wall_matrix[2*j+2][2*my_maze.rows-2-2*i] = 1;
-        }
+    #[test]
+    fn prim_test() {
+        let my_maze_test = Maze::init_rect(40,60,maze::NO_SQUARE_WRAP,GenerationType::Prim).unwrap();
+        dungeon::print_dungeon_as_image(&dungeon::maze_to_map(&my_maze_test).unwrap(),"test_files\\Prim_Basic_test.png".to_string(),5);
     }
 
-    for (x, y, pixel) in imgbuf.enumerate_pixels_mut() {
-        if wall_matrix[(x/block_size_u32) as usize][(y/block_size_u32) as usize] == 1 {
-            *pixel = image::Rgb([0, 0, 0]);
-        }else {
-            *pixel = image::Rgb([255, 255, 255]);
-        }
+    #[test]
+    fn prim_ring_test() {
+        let my_maze_test = Maze::init_rect(40,60,maze::RING_SQUARE_WRAP,GenerationType::Prim).unwrap();
+        dungeon::print_dungeon_as_image(&dungeon::maze_to_map(&my_maze_test).unwrap(),"test_files\\Prim_Ring_Wrap_test.png".to_string(),5);
     }
 
-    if output_file_name.contains(".jpeg") || output_file_name.contains(".png") {
-        imgbuf.save(output_file_name).unwrap();
-    } else {
-      imgbuf.save(output_file_name + ".png").unwrap();
+    #[test]
+    fn prim_tours_test() {
+        let my_maze_test = Maze::init_rect(40,60,maze::MAX_SQUARE_WRAP,GenerationType::Prim).unwrap();
+        dungeon::print_dungeon_as_image(&dungeon::maze_to_map(&my_maze_test).unwrap(),"test_files\\Prim_Tours_Wrap_test.png".to_string(),5);
     }
+
+    #[test]
+    fn wilson_test() {
+        let my_maze_test = Maze::init_rect(40,60,maze::NO_SQUARE_WRAP,GenerationType::Wilson).unwrap();
+        dungeon::print_dungeon_as_image(&dungeon::maze_to_map(&my_maze_test).unwrap(),"test_files\\Wilson_Basic_test.png".to_string(),5);
+    }
+
+    #[test]
+    fn wilson_ring_test() {
+        let my_maze_test = Maze::init_rect(40,60,maze::RING_SQUARE_WRAP,GenerationType::Wilson).unwrap();
+        dungeon::print_dungeon_as_image(&dungeon::maze_to_map(&my_maze_test).unwrap(),"test_files\\Wilson_Ring_Wrap_test.png".to_string(),5);
+    }
+
+    #[test]
+    fn wilson_tours_test() {
+        let my_maze_test = Maze::init_rect(40,60,maze::MAX_SQUARE_WRAP,GenerationType::Wilson).unwrap();
+        dungeon::print_dungeon_as_image(&dungeon::maze_to_map(&my_maze_test).unwrap(),"test_files\\Wilson_Tours_Wrap_test.png".to_string(),5);
+    }
+
+    #[test]
+    fn backtrack_twisty_test() {
+        let my_maze_test = Maze::init_rect(40,60,maze::NO_SQUARE_WRAP,GenerationType::Wilson).unwrap();
+        dungeon::print_dungeon_as_image(&dungeon::maze_to_map(&my_maze_test).unwrap(),"test_files\\Backtrack_Twisty_Basic_test.png".to_string(),5);
+    }
+
+    #[test]
+    fn backtrack_twisty_ring_test() {
+        let my_maze_test = Maze::init_rect(40,60,maze::RING_SQUARE_WRAP,GenerationType::Wilson).unwrap();
+        dungeon::print_dungeon_as_image(&dungeon::maze_to_map(&my_maze_test).unwrap(),"test_files\\Backtrack_Twisty_Ring_Wrap_test.png".to_string(),5);
+    }
+
+    #[test]
+    fn backtrack_twisty_tours_test() {
+        let my_maze_test = Maze::init_rect(40,60,maze::MAX_SQUARE_WRAP,GenerationType::Wilson).unwrap();
+        dungeon::print_dungeon_as_image(&dungeon::maze_to_map(&my_maze_test).unwrap(),"test_files\\Backtrack_Twisty_Tours_Wrap_test.png".to_string(),5);
+    }
+
+    #[test]
+    fn test_bitmask() {
+
+        let mut bitmask = vec![vec![true; 40]; 40];
+        for i in 0..20{
+            for j in 0..20 {
+                bitmask[i+10][j+10] = false;
+            }
+        }
+        let my_maze_test = Maze::init_rect_with_bitmask(40,40,maze::NO_SQUARE_WRAP, &bitmask,GenerationType::Backtrack(1.0)).unwrap();
+        dungeon::print_dungeon_as_image(&dungeon::maze_to_map(&my_maze_test).unwrap(),"test_files\\Backtract_Bitmask_Doughnut_test.png".to_string(),5);
+    }
+
+    #[test]
+    fn test_erase_dead_ends() {
+        use rand::{Rng, StdRng};
+
+        let mut my_maze_test = Maze::init_rect(40,40,maze::MAX_SQUARE_WRAP,GenerationType::Backtrack(0.75)).unwrap();
+        let mut my_dead_ends = my_maze_test.get_dead_ends();
+        let mut rng = StdRng::new().unwrap();
+        rng.shuffle(&mut my_dead_ends);
+        let stop = ((my_dead_ends.len() as f64)*0.5) as usize;
+        for i in 0..stop {
+            my_maze_test.erase_dead_end(my_dead_ends[i]);
+        }
+        dungeon::print_dungeon_as_image(&dungeon::maze_to_map(&my_maze_test).unwrap(),"test_files\\Backtract_Dead_End_Erase_test.png".to_string(),5);
+    }
+
+    #[test]
+    fn test_dungeon() {
+        dungeon::print_dungeon_as_image(&dungeon::create_dungeon(23,43,0,GenerationType::Backtrack(0.75),10,0.9,true).unwrap(),"test_files\\Dungeon_test.png".to_string(),5);
+    }
+
 }
