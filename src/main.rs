@@ -33,18 +33,22 @@ fn main() {
             .help("Sets the depth of the maze. Must be a positive integer.")
             .index(2)
             .required(true))
+        .arg(Arg::with_name("num_rooms")
+            .help("Maximum number of rooms allowed in the dungeon.")
+            .index(3)
+            .required(true))
+        .arg(Arg::with_name("dead_end_rm_ratio")
+            .help("Ratio of dead-ends to remove.")
+            .index(4)
+            .required(true))
         .arg(Arg::with_name("output_file")
             .help("Sets the name of the output file.")
-            .index(3)
+            .index(5)
             .required(true))
         .arg(Arg::with_name("cave")
             .help("The program will generate a cave.")
             .short("c")
             .long("cave"))
-        .arg(Arg::with_name("dungeon")
-            .help("The program will generate a dungeon.")
-            .short("d")
-            .long("dungeon"))
         .arg(Arg::with_name("wilson")
             .help("The program will generate the maze with Wilson's Algoirthm")
             .short("w")
@@ -73,17 +77,23 @@ fn main() {
             .takes_value(false)
             .long("wrap")
             .multiple(true))
+        .arg(Arg::with_name("outside")
+            .help("If persent, allows the dungeon to have exits off the map. If wrapping is present this is ignored.")
+            .short("o")
+            .long("outside"))
         .get_matches();
 
     print!("Using the following arguments to generate from:\n");
-    print!("x: {}    y: {}    Caves: {}    Prim: {}    Wilson: {}   Dungeon: {}    Wrapping {}\n",
+    print!("x: {}    y: {}    num_rooms: {}    dead_end_rm_ratio: {}    Caves: {}    Prim: {}    Wilson: {}    Wrapping: {}    outside: {}\n",
         matches.value_of("maze x_length").unwrap().to_string(),
         matches.value_of("maze y_length").unwrap().to_string(),
+        matches.value_of("num_rooms").unwrap().to_string(),
+        matches.value_of("dead_end_rm_ratio").unwrap().to_string(),
         matches.is_present("cave"),
         matches.is_present("prim"),
         matches.is_present("wilson"),
-        matches.is_present("dungeon"),
         matches.is_present("wrapping"),
+        matches.is_present("outside"),
     );
     print!("output file: {}\n", matches.value_of("output_file").unwrap().to_string());
 
@@ -105,12 +115,18 @@ fn main() {
             },
             None => print_cave(&my_cave,output_file_name),
         }
-    } else if matches.is_present("dungeon"){
-        let NUM_ROOMS = 10;
-        let OUTSIDE_EXITS = true;
-        let PRUNE_DEAD_ENDS = 0.9;
+    } else {
+        let num_rooms = matches.value_of("num_rooms").unwrap().parse::<usize>().unwrap();
+        let outside_exits = matches.is_present("outside");
+        let prune_dead_ends = matches.value_of("dead_end_rm_ratio").unwrap().parse::<f64>().unwrap();
         let generation_method;
         let (wilson, prim, backtrack) = (matches.is_present("wilson"),matches.is_present("prim"),matches.is_present("backtrack"));
+        print!("{} {} {} {}\n", wilson, prim, backtrack, wilson || prim || backtrack);
+        // sanity check before generation
+        if !(wilson || prim || backtrack) {
+          print!("You must select (w)ilson, (p)rim or (b)acktrack when not running (c)aves. \nExiting.");
+          process::exit(1);
+        }
         match (wilson, prim, backtrack){
             (true,_,_) => generation_method = GenerationType::Wilson,
             (_,true,_) => generation_method = GenerationType::Prim,
@@ -123,35 +139,9 @@ fn main() {
                 if block < 10 {
                     block = 10
                 }
-                dungeon::print_dungeon_as_image(&dungeon::create_dungeon(rows, columns, wrap as usize,generation_method,NUM_ROOMS,PRUNE_DEAD_ENDS,OUTSIDE_EXITS).unwrap(),output_file_name,block);
+                dungeon::print_dungeon_as_image(&dungeon::create_dungeon(rows, columns, wrap as usize,generation_method,num_rooms,prune_dead_ends,outside_exits).unwrap(),output_file_name,block);
             },
-            None => dungeon::print_dugenon_to_file(&dungeon::create_dungeon(rows, columns, wrap as usize,generation_method,NUM_ROOMS,PRUNE_DEAD_ENDS,OUTSIDE_EXITS).unwrap(),output_file_name),
-        }
-    } else { //we generate a maze
-        let (wilson, prim, backtrack) = (matches.is_present("wilson"),matches.is_present("prim"),matches.is_present("backtrack"));
-        print!("{} {} {} {}\n", wilson, prim, backtrack, wilson || prim || backtrack);
-        // sanity check before generation
-        if !(wilson || prim || backtrack) {
-          print!("You must select (w)ilson, (p)rim or (b)acktrack when not running (c)aves. \nExiting.");
-          process::exit(1);
-        }
-        let my_maze;
-        match (wilson, prim, backtrack){
-            (true,_,_) => my_maze = Maze::init_rect(rows, columns, wrap as usize,GenerationType::Wilson).unwrap(),
-            (_,true,_) => my_maze = Maze::init_rect(rows, columns, wrap as usize,GenerationType::Prim).unwrap(),
-            (_,_,true) => my_maze = Maze::init_rect(rows, columns, wrap as usize,GenerationType::Backtrack(matches.value_of("backtrack").unwrap().parse::<f64>().unwrap())).unwrap(),
-            _ => unreachable!(),
-        }
-    
-        match matches.value_of("image") {
-            Some(block_size) => {
-                let mut block = block_size.parse::<usize>().unwrap();
-                if block < 10 {
-                    block = 10
-                }
-                dungeon::print_dungeon_as_image(&dungeon::maze_to_map(&my_maze).unwrap(),output_file_name, block);
-            },
-            None => dungeon::print_dugenon_to_file(&dungeon::maze_to_map(&my_maze).unwrap(),output_file_name),
+            None => dungeon::print_dugenon_to_file(&dungeon::create_dungeon(rows, columns, wrap as usize,generation_method,num_rooms,prune_dead_ends,outside_exits).unwrap(),output_file_name),
         }
     }
 }

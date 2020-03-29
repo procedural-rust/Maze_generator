@@ -240,6 +240,9 @@ impl Room {
 //Dungeon
 ////////////////////
 
+//Dungeon
+//Purpose:
+//    An array of Tiles to represent the a map.
 #[derive(Debug)]
 pub struct Dungeon {
     pub rows: usize,
@@ -247,6 +250,12 @@ pub struct Dungeon {
 	pub map_matrix: Vec<Vec<Tile>>
 }
 
+//maze_to_map
+//Purpose:
+//    Given a maze object which state the directions, creates a dungeon which is an array of tiles.
+//Notes:
+//    Since the cells in a map are connected by direction,
+//      the actual map must be expaned to allows for cells in those directions.
 pub fn maze_to_map(my_maze: &maze::Maze) -> Result<Dungeon,DungeonError>{
     let maze_columns = my_maze.columns;
     let maze_rows = my_maze.rows;
@@ -278,14 +287,27 @@ pub fn maze_to_map(my_maze: &maze::Maze) -> Result<Dungeon,DungeonError>{
     Ok(Dungeon{rows: (2*maze_rows + 1), columns: (2*maze_columns + 1), map_matrix: map_matrix})
 }
 
-pub fn connect_dugeon(my_maze: &mut maze::Maze, my_rooms: &Vec<Room>, wrap: usize){
-    let mut check_matrix = vec![vec![false; my_maze.columns]; my_maze.rows];
-    let mut cell_moves = Vec::new();
+//connect_dugeon
+//Purpose:
+//    Given a maze object add cells and direction to make the dugeon contiguous (evey cell can be reached by every other cell)
+//Notes:
+//    To make sure the dungeon is contiguous, a flood-fill type alogirthm is used.
+//    Starte with cell (0,0) which always exists and find all of the directions out of the cell.
+//    Now moving in these directions will give new cells, mark these cells as visited and add the directions out of those cells.
+//    Any time a cell is visiited check if it has already been visited, if not add the directions out of the new cell.
+//    Once all possible direction reachable from (0,0) have been done, check if there are cells still to be visited.
+//    If so, find one that is adjacent to a already visited cell and create a passage between the two and add all directions out of this new cell.
+//    Contiue this until every cell has been visited.
+//Post-Conditions:
+//    The maze object will be modifed.
+pub fn connect_dugeon(my_maze: &mut maze::Maze, wrap: usize){
+    let mut check_matrix = vec![vec![false; my_maze.columns]; my_maze.rows]; //indicates which cells we have already visited.
+    let mut cell_moves = Vec::new(); //moves that can be taken by cells we have reached.
     let mut current_cell = Point::init(0,0);
     let mut current_dir = Direction::North;
 
     //start with cell (0,0) which will always exist.
-    //push all valid directions
+    //push all valid directions out of that cell.
     let start_exits = my_maze.maze_matrix[0][0].get_exits();
     for exit in start_exits {
         cell_moves.push(Wall::init(current_cell,exit));
@@ -293,13 +315,15 @@ pub fn connect_dugeon(my_maze: &mut maze::Maze, my_rooms: &Vec<Room>, wrap: usiz
     check_matrix[current_cell.row][current_cell.col] = true;
 
 
+    //while every cell is not yet reachable
     let mut is_contiguous = false;
     while !is_contiguous {
         while cell_moves.len() != 0 {// there are still cells to check
             let move_to = cell_moves.pop().unwrap();
             current_cell = move_to.cell;
+            //get the cell that the move goes to.
             let next_cell_check = maze::get_cell_in_direction(my_maze.rows, my_maze.columns, current_cell.row, current_cell.col, move_to.dir, wrap);
-            match next_cell_check {
+            match next_cell_check { //if we can actualy move in this direction (could be stopped by the boundary of the map if no wrapping)
                 Some(next_cell) => {
                     if !check_matrix[next_cell.row][next_cell.col] { //If this next cell is not already connected, add it and push directions.
                         check_matrix[next_cell.row][next_cell.col] = true;
@@ -317,13 +341,14 @@ pub fn connect_dugeon(my_maze: &mut maze::Maze, my_rooms: &Vec<Room>, wrap: usiz
         let mut all_filled = true;
         for i in 0..my_maze.rows {
             for j in 0..my_maze.columns {
+                //Once we found a cell that has not been visited we don't need to look for more.
                 if !new_break && (check_matrix[i][j] == false) {
-                    all_filled = false;
-                    new_break = true;
-                    check_matrix[i][j] = true;
+                    all_filled = false; //An unvisited cell was found
+                    new_break = true; //We found a unvisited cell, no need to keep looking.
+                    check_matrix[i][j] = true; //It will now be visited.
 
-                    let mut added_dir = false;
-                    for direction in Direction::get_all_square_directions() {
+                    let mut added_dir = false; //We need to add an exit from this cell to one that has been visited, but only one.
+                    for direction in Direction::get_all_square_directions() { //check all ways out of this cell.
                         if !added_dir {
                             match maze::get_cell_in_direction(my_maze.rows, my_maze.columns, i, j, direction, wrap) {
                                 Some(break_out_cell) => {
@@ -346,6 +371,28 @@ pub fn connect_dugeon(my_maze: &mut maze::Maze, my_rooms: &Vec<Room>, wrap: usiz
     }
 }
 
+//create_dungeon
+//Purpose:
+//    Creates a dungeon with the given perameters.
+//Notes:
+//    my_rows: the number of rows in the underlying MAZE, the actual dungeon will have 2*my_rows+1
+//    my_columns: the number of columns in the underlying MAZE, the actual dungeon will have 2*my_columns+1
+//    wrap: Allows the maze to wrap around the edges. If any wrapping is allowed then outside_exits is ignored.
+//    method: The method used to create the underlying maze.
+//    num_room: the maximum number of rooms the dungeon can have.
+//      Each room in placed randomly, it the random placement overlappes with another room it tries again.
+//      If after ROOM_PLACEMENT_ATTEMPTS a valid place has not been found then the room is discarded.
+//    prune_dead_ends_ratio: The ratio of dead_ends to remove, 0.0 means nothing is removed.
+//      1.0 means that dungeon will have no dead ends.
+//    outside_exits: If true allow cells to exit the edge of the map, if any wrapping is allowed this value is ignored.
+//
+//    To make the dungeon the rooms are generated first.
+//    A maze is then made around the rooms.
+//    Exits from rooms are then made into the maze, exits default to going into the maze (as opposed to another room) is possible.
+//    The dungeon is then made to be contiguous (odd room and exit placement can cause the dungeon to be disconnected.)
+//    Dead ends are removed AFTER the maze is made contiguous.
+//Pre-Conditions:
+//    prune_dead_ends_ratio must be between  0.0 and 1.0 inclusive. (verified)
 pub fn create_dungeon(my_rows: usize, my_columns: usize, wrap: usize, method: GenerationType, num_rooms: usize, prune_dead_ends_ratio: f64, outside_exits: bool) -> Result<Dungeon,DungeonError>{
 
     const ROOM_MIN_WIDTH: usize = 2;
@@ -360,6 +407,16 @@ pub fn create_dungeon(my_rows: usize, my_columns: usize, wrap: usize, method: Ge
 
     const OUTSIDE_MIN_EXITS: usize = 1;
     const OUTSIDE_MAX_EXITS: usize = 4;
+
+    //verify that prune_dead_ends_ratio is betweenn 0.0 and 1.0, if not move it to closest valid value.
+    let prune_dead_ends_ratio_cleaned;
+    if prune_dead_ends_ratio < 0.0 {
+        prune_dead_ends_ratio_cleaned = 0.0;
+    }else if prune_dead_ends_ratio > 1.0 {
+        prune_dead_ends_ratio_cleaned = 1.0
+    }else{
+        prune_dead_ends_ratio_cleaned = prune_dead_ends_ratio;
+    }
 
 
     //create rooms for dungeon.
@@ -419,6 +476,7 @@ pub fn create_dungeon(my_rows: usize, my_columns: usize, wrap: usize, method: Ge
 
         let num_exits = rand::thread_rng().gen_range(ROOM_MIN_EXITS,ROOM_MAX_EXITS+1);
 
+        //determine which exits go into the maze vs other rooms, vs off the map.
         let my_walls = room.get_walls();
         let mut exits_to_outside = Vec::new();
         let mut exits_to_another_room = Vec::new();
@@ -457,7 +515,7 @@ pub fn create_dungeon(my_rows: usize, my_columns: usize, wrap: usize, method: Ge
     }
 
     //make the maze contiguous
-    connect_dugeon(&mut my_maze, &my_rooms, wrap);
+    connect_dugeon(&mut my_maze, wrap);
 
     //make exits off the map
     if outside_exits && (wrap == maze::NO_SQUARE_WRAP) { //to have outside exits, they must be enabled and no wrapping.
@@ -471,7 +529,7 @@ pub fn create_dungeon(my_rows: usize, my_columns: usize, wrap: usize, method: Ge
     }
 
     //erase dead ends.
-    if prune_dead_ends_ratio != 0.0 { // if we don't erase any dead ends there is no point in even finding them.
+    if prune_dead_ends_ratio_cleaned != 0.0 { // if we don't erase any dead ends there is no point in even finding them.
 
         //get dead ends
         let my_dead_ends = my_maze.get_dead_ends();
@@ -491,7 +549,7 @@ pub fn create_dungeon(my_rows: usize, my_columns: usize, wrap: usize, method: Ge
         //erase dead ends.
         let mut rng = StdRng::new().unwrap();
         rng.shuffle(&mut actual_dead_ends);
-        let stop = ((actual_dead_ends.len() as f64)*prune_dead_ends_ratio) as usize;
+        let stop = ((actual_dead_ends.len() as f64)*prune_dead_ends_ratio_cleaned ) as usize;
         for i in 0..stop {
             //it could be that two dead-ends lead to each other and so erasing one erases the other.
             if my_maze.maze_matrix[actual_dead_ends[i].row][actual_dead_ends[i].col].get_number_of_exits() != 0 {
@@ -499,8 +557,6 @@ pub fn create_dungeon(my_rows: usize, my_columns: usize, wrap: usize, method: Ge
             }
         }
     }
-
-    //verify that the dugeon in continguous, which is to say that every cell can be reached by every other cell.
 
     //turn maze into a dungeon. (This should not return a error)
     let mut my_dungeon = maze_to_map(&my_maze).unwrap();
@@ -520,6 +576,9 @@ pub fn create_dungeon(my_rows: usize, my_columns: usize, wrap: usize, method: Ge
 
 }
 
+//print_dungeon_as_image
+//Purpose:
+//    Creates a image file displaying the dugeon.
 pub fn print_dungeon_as_image(my_dungeon: &Dungeon, output_file_name: String, block_size: usize){
     let block_size_u32 = block_size as u32;
     let mut imgbuf = image::ImageBuffer::new((block_size*my_dungeon.rows) as u32, (block_size*my_dungeon.columns) as u32);
@@ -542,6 +601,9 @@ pub fn print_dungeon_as_image(my_dungeon: &Dungeon, output_file_name: String, bl
     }
 }
 
+//print_dugenon_to_file
+//Purpose:
+//    Creates a textfile displaying the dugeon as a ASCII map.
 pub fn print_dugenon_to_file(my_dungeon: &Dungeon, output_file_name: String){
     let file = File::create(output_file_name).expect("Unable to create file");
     let mut f = BufWriter::new(file);
@@ -549,6 +611,9 @@ pub fn print_dugenon_to_file(my_dungeon: &Dungeon, output_file_name: String){
     f.flush().unwrap();
 }
 
+//print_dugenon_to_file
+//Purpose:
+//    Displays the dugeon as a ASCII map on the terminal.
 pub fn print_dungeon(my_dungeon: &Dungeon, out_stream: &mut io::Write){
     for i in 0..my_dungeon.rows {
         for j in 0..my_dungeon.columns {
